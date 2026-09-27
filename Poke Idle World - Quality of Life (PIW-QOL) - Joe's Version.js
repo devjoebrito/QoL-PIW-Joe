@@ -2,8 +2,8 @@
 // @name         Poke Idle World - Quality of Life (PIW-QOL) - Barra por local
 // @namespace    http://tampermonkey.net/
 // @version      10.2.2
-// @description  Suporte a ícones oficiais via items.json, botão de hunt nas Quests/Tasks e Hunt Analyzer sem travamentos.
-// @author       Desjunior (JulianoCLI)
+// @description  Suporte a ícones oficiais via items.json, botão de hunt nas Quests/Tasks e Hunt Analyzer sem travamentos. Atualizado para as novas diretrizes
+// @author       Desjunior (JulianoCLI) + JoeBrito 
 // @match        https://poke.idleworld.online/play*
 // @grant        none
 // @run-at       document-start
