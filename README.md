@@ -98,7 +98,7 @@ Clique na estrela de uma hunt para salvá-la. Se existirem várias favoritas, o 
 
 ### Verificar melhor hunt
 
-O botão abre o [PIW Tools](https://piwtools.com.br/) e preenche os dados necessários do Pokémon principal, como nível, atributos, clã e objetivo de rota. Cookies, senha e tokens não são enviados.
+O botão abre o [PIW Tools](https://www.piwtools.com.br/) e preenche os dados necessários do Pokémon principal, como nível, atributos, clã e objetivo de rota. O cálculo da melhor hunt é realizado pelo PIW Tools; cookies, senha e tokens não são enviados.
 
 ## Quests e Tasks
 
@@ -352,6 +352,7 @@ O objeto pode estar protegido por cadeado, raridade, filtro ou pela lista de con
 
 - Projeto original e README-base: **Desjunior / [JulianoCLI](https://github.com/JulianoCLI/PIW-QOL)**.
 - Atualizador desta versão: **[JoeBrito](https://github.com/devjoebrito)**.
+- Cálculo do recurso **Verificar melhor hunt**: **[PIW Tools](https://www.piwtools.com.br/)**.
 - Desenvolvimento realizado para a comunidade do Pokémon Idle World.
 
 Sugestões e problemas podem ser registrados nas [Issues deste repositório](https://github.com/devjoebrito/QoL-PIW-Joe/issues).
