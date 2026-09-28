@@ -8,6 +8,21 @@ As versões seguem o formato `MAJOR.MINOR.PATCH`:
 - **MINOR:** nova função ou revisão importante;
 - **PATCH:** correção pequena sem mudança relevante de uso.
 
+## 10.4.5 — 28/09/2026
+
+### Nome do userscript
+
+- O nome exibido pelo Tampermonkey passa a ser **Poke Idle World - Quality of Life (PIW-QOL) - Joe's Version**.
+
+## 10.4.4 — 28/09/2026
+
+### Instalação pelo Tampermonkey
+
+- O arquivo principal foi renomeado de `.js` para `.user.js`, formato reconhecido automaticamente pelos gerenciadores de userscripts.
+- Os botões de instalação agora apontam diretamente para o novo arquivo raw.
+- `@updateURL` e `@downloadURL` foram atualizados para o caminho `.user.js`.
+- A versão foi incrementada para `10.4.4` para que a correção seja identificada como uma nova atualização.
+
 ## 10.4.3 — 28/09/2026
 
 ### Créditos do userscript
@@ -129,134 +144,3 @@ As versões seguem o formato `MAJOR.MINOR.PATCH`:
 ### Compatibilidade
 
 - O `@match` passou a aceitar variações e parâmetros depois de `/play`.
-
-## 10.1.1 — base herdada do PIW-QOL
-
-- Auto-reconnect da hunt usando `leave-hunt` e `enter-hunt` no mesmo local.
-- Imagens dos Pokémon na lista de venda.
-- Compatibilidade da busca de hunts com as abas visuais de regiões do mapa.
-- Porcentagem de potencial desativada por padrão.
-- Uso dos cadeados nativos do jogo.
-- Melhorias de desempenho em rotinas executadas durante hunts.
-
-Consulte também o [projeto original de JulianoCLI](https://github.com/JulianoCLI/PIW-QOL) para o histórico anterior desta base.
-
-## 10.1.0 — cadeados nativos
-
-- Removida a lista paralela de proteção por cadeado.
-- O script passou a usar o sistema de cadeados oferecido pelo próprio jogo.
-
-## Como publicar uma nova versão
-
-### 1. Escolha o novo número
-
-Exemplos:
-
-- correção pequena: `10.3.0` → `10.3.1`;
-- nova função: `10.3.0` → `10.4.0`;
-- mudança incompatível: `10.3.0` → `11.0.0`.
-
-### 2. Atualize os arquivos
-
-1. Altere `@version` no cabeçalho de `Poke Idle World - Quality of Life (PIW-QOL) - Joe's Version.js`.
-2. Atualize o badge e a menção da versão mais recente no `README.md`.
-3. Adicione a nova versão no topo deste arquivo.
-4. Atualize a documentação das funções que mudaram.
-
-O Tampermonkey só oferece a atualização quando o valor de `@version` é maior que o instalado.
-
-### 3. Valide o userscript
-
-No PowerShell, a partir da pasta do repositório:
-
-```powershell
-node --check "Poke Idle World - Quality of Life (PIW-QOL) - Joe's Version.js"
-git diff --check
-```
-
-Depois, teste manualmente no jogo pelo menos:
-
-- carregamento do script;
-- abertura do mapa e das configurações;
-- teleporte por favorita e por Quest/Task;
-- uma compra ou janela de confirmação sem concluir uma operação desnecessária;
-- Hunt Analyzer durante uma hunt;
-- auto-reconnect com o console aberto;
-- proteção durante uma boss, quando houver ambiente seguro para o teste.
-
-### 4. Revise os metadados de atualização
-
-Confirme que estas linhas continuam apontando para o arquivo da branch `main`:
-
-```text
-@updateURL
-@downloadURL
-```
-
-Depois do push, abra o [arquivo raw do userscript](https://raw.githubusercontent.com/devjoebrito/QoL-PIW-Joe/main/Poke%20Idle%20World%20-%20Quality%20of%20Life%20%28PIW-QOL%29%20-%20Joe%27s%20Version.js) e confira se o novo `@version` aparece no cabeçalho.
-
-### 5. Commit, tag e push
-
-Exemplo para a versão `10.3.0`:
-
-```powershell
-git add "Poke Idle World - Quality of Life (PIW-QOL) - Joe's Version.js" README.md UPDATES.md
-git commit -m "Release 10.3.0"
-git tag -a v10.3.0 -m "PIW-QOL Joe's Version 10.3.0"
-git push origin main
-git push origin v10.3.0
-```
-
-O push da branch `main` atualiza o arquivo consultado pelo Tampermonkey. A tag preserva um ponto fixo para a versão publicada.
-
-### 6. Crie a Release no GitHub
-
-Na página do repositório:
-
-1. abra **Releases**;
-2. escolha **Draft a new release**;
-3. selecione a tag criada;
-4. use o título `PIW-QOL Joe's Version X.Y.Z`;
-5. copie a entrada correspondente deste arquivo para a descrição;
-6. publique a Release.
-
-## Modelo de notas para a próxima versão
-
-Copie este bloco para o topo do arquivo e substitua os campos:
-
-```markdown
-## X.Y.Z — DD/MM/AAAA
-
-### Adicionado
-
-- Nova função.
-
-### Alterado
-
-- Comportamento revisado.
-
-### Corrigido
-
-- Problema resolvido.
-
-### Segurança e desempenho
-
-- Proteção ou otimização aplicada.
-
-### Observações de atualização
-
-- Informe se o jogador precisa reabrir uma janela, limpar alguma preferência ou recarregar a página.
-```
-
-## Checklist rápido de release
-
-- [ ] `@version` foi incrementado.
-- [ ] `README.md` mostra a versão correta.
-- [ ] `UPDATES.md` possui as notas da nova versão.
-- [ ] `node --check` passou.
-- [ ] `git diff --check` passou.
-- [ ] As funções alteradas foram testadas no jogo.
-- [ ] Os links `@updateURL` e `@downloadURL` continuam válidos.
-- [ ] O commit e a tag usam o mesmo número de versão.
-- [ ] O arquivo raw exibe a versão publicada.
-- [ ] A Release do GitHub foi criada.

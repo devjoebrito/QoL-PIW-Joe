@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         Poke Idle World - Quality of Life (PIW-QOL) - Barra por local
+// @name         Poke Idle World - Quality of Life (PIW-QOL) - Joe's Version
 // @namespace    http://tampermonkey.net/
-// @version      10.4.3
+// @version      10.4.5
 // @description  Mercado e Depot fora das hunts, retorno rápido à cidade, buscas de itens e auto-reconnect resiliente.
 // @author       Desjunior (JulianoCLI)
 // @updater      JoeBrito
@@ -10,8 +10,8 @@
 // @run-at       document-start
 // @homepageURL  https://github.com/devjoebrito/QoL-PIW-Joe
 // @supportURL   https://github.com/devjoebrito/QoL-PIW-Joe/issues
-// @updateURL    https://raw.githubusercontent.com/devjoebrito/QoL-PIW-Joe/main/Poke%20Idle%20World%20-%20Quality%20of%20Life%20%28PIW-QOL%29%20-%20Joe%27s%20Version.js
-// @downloadURL  https://raw.githubusercontent.com/devjoebrito/QoL-PIW-Joe/main/Poke%20Idle%20World%20-%20Quality%20of%20Life%20%28PIW-QOL%29%20-%20Joe%27s%20Version.js
+// @updateURL    https://raw.githubusercontent.com/devjoebrito/QoL-PIW-Joe/main/Poke%20Idle%20World%20-%20Quality%20of%20Life%20%28PIW-QOL%29%20-%20Joe%27s%20Version.user.js
+// @downloadURL  https://raw.githubusercontent.com/devjoebrito/QoL-PIW-Joe/main/Poke%20Idle%20World%20-%20Quality%20of%20Life%20%28PIW-QOL%29%20-%20Joe%27s%20Version.user.js
 // ==/UserScript==
 
 (function() {

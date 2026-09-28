@@ -2,8 +2,8 @@
 
 Userscript gratuito para [Pokémon Idle World](https://poke.idleworld.online/play) com atalhos de navegação, mapa aprimorado, lojas portáteis, melhorias no Hunt Analyzer e recuperação automática de hunts.
 
-[![Versão](https://img.shields.io/badge/vers%C3%A3o-10.4.3-blue?style=for-the-badge)](UPDATES.md)
-[![Instalar](https://img.shields.io/badge/instalar-userscript-brightgreen?style=for-the-badge)](https://raw.githubusercontent.com/devjoebrito/QoL-PIW-Joe/main/Poke%20Idle%20World%20-%20Quality%20of%20Life%20%28PIW-QOL%29%20-%20Joe%27s%20Version.js)
+[![Versão](https://img.shields.io/badge/vers%C3%A3o-10.4.5-blue?style=for-the-badge)](UPDATES.md)
+[![Instalar](https://img.shields.io/badge/instalar-userscript-brightgreen?style=for-the-badge)](https://raw.githubusercontent.com/devjoebrito/QoL-PIW-Joe/main/Poke%20Idle%20World%20-%20Quality%20of%20Life%20%28PIW-QOL%29%20-%20Joe%27s%20Version.user.js)
 [![Atualizações](https://img.shields.io/badge/notas-UPDATES.md-orange?style=for-the-badge)](UPDATES.md)
 
 > Este é um projeto da comunidade e não é uma ferramenta oficial dos desenvolvedores do Pokémon Idle World.
@@ -21,7 +21,7 @@ O PIW-QOL melhora a interface do jogo e concentra funções que normalmente exig
 - auto-reconnect com confirmação do servidor, backoff e proteção para bosses;
 - configurações persistidas localmente no navegador.
 
-A versão **10.4.3** mantém Mercado e Depot disponíveis fora das hunts, usa 🏠 para voltar a Cerulean, inclui pesquisas de itens e amplia para 30 segundos os limites do auto-reconnect, evitando falsos travamentos em batalhas mais lentas. Consulte o [histórico de atualizações](UPDATES.md).
+A versão **10.4.5** usa o nome oficial **Poke Idle World - Quality of Life (PIW-QOL) - Joe's Version** no Tampermonkey, além de manter a instalação direta por `.user.js` e as melhorias recentes. Consulte o [histórico de atualizações](UPDATES.md).
 
 > O script não joga sozinho. Compras, vendas, teletransportes e movimentações de inventário continuam dependendo das ações do jogador. O auto-reconnect apenas tenta restaurar a hunt que já estava ativa.
 
@@ -39,7 +39,7 @@ Escolha apenas um:
 
 ### 2. Instale o PIW-QOL
 
-1. Abra o link **[Instalar PIW-QOL — Joe's Version](https://raw.githubusercontent.com/devjoebrito/QoL-PIW-Joe/main/Poke%20Idle%20World%20-%20Quality%20of%20Life%20%28PIW-QOL%29%20-%20Joe%27s%20Version.js)**.
+1. Abra o link **[Instalar PIW-QOL — Joe's Version](https://raw.githubusercontent.com/devjoebrito/QoL-PIW-Joe/main/Poke%20Idle%20World%20-%20Quality%20of%20Life%20%28PIW-QOL%29%20-%20Joe%27s%20Version.user.js)**.
 2. O Tampermonkey mostrará o código e os dados do userscript.
 3. Clique em **Instalar**.
 4. Abra ou atualize `https://poke.idleworld.online/play`.
@@ -297,11 +297,11 @@ O userscript possui `@updateURL` e `@downloadURL` apontando para este repositór
 Para verificar manualmente:
 
 1. abra o painel do Tampermonkey;
-2. localize **Poke Idle World - Quality of Life (PIW-QOL) - Barra por local**;
+2. localize **Poke Idle World - Quality of Life (PIW-QOL) - Joe's Version**;
 3. escolha **Verificar atualizações**;
 4. recarregue a página do jogo.
 
-Também é possível abrir novamente o [link de instalação](https://raw.githubusercontent.com/devjoebrito/QoL-PIW-Joe/main/Poke%20Idle%20World%20-%20Quality%20of%20Life%20%28PIW-QOL%29%20-%20Joe%27s%20Version.js).
+Também é possível abrir novamente o [link de instalação](https://raw.githubusercontent.com/devjoebrito/QoL-PIW-Joe/main/Poke%20Idle%20World%20-%20Quality%20of%20Life%20%28PIW-QOL%29%20-%20Joe%27s%20Version.user.js).
 
 As notas de cada versão e o procedimento de publicação estão em [UPDATES.md](UPDATES.md).
 
@@ -315,7 +315,7 @@ As notas de cada versão e o procedimento de publicação estão em [UPDATES.md]
 
 ### Lojas ou Depot não aparecem durante a hunt
 
-Na versão 10.4.3, isso é intencional. Durante hunts, Lojas/Mercado e Depot ficam ocultos; use o botão 🏠 para voltar a Cerulean. Esses serviços continuam visíveis no mapa de Mercado e nos demais locais que não sejam hunts.
+Na versão 10.4.5, isso é intencional. Durante hunts, Lojas/Mercado e Depot ficam ocultos; use o botão 🏠 para voltar a Cerulean. Esses serviços continuam visíveis no mapa de Mercado e nos demais locais que não sejam hunts.
 
 ### O auto-reconnect não foi executado
 
@@ -358,4 +358,4 @@ Sugestões e problemas podem ser registrados nas [Issues deste repositório](htt
 
 ---
 
-**[Instalar o script](https://raw.githubusercontent.com/devjoebrito/QoL-PIW-Joe/main/Poke%20Idle%20World%20-%20Quality%20of%20Life%20%28PIW-QOL%29%20-%20Joe%27s%20Version.js)** · **[Ver atualizações](UPDATES.md)** · **[Abrir o jogo](https://poke.idleworld.online/play)**
+**[Instalar o script](https://raw.githubusercontent.com/devjoebrito/QoL-PIW-Joe/main/Poke%20Idle%20World%20-%20Quality%20of%20Life%20%28PIW-QOL%29%20-%20Joe%27s%20Version.user.js)** · **[Ver atualizações](UPDATES.md)** · **[Abrir o jogo](https://poke.idleworld.online/play)**
