@@ -1,12 +1,17 @@
 // ==UserScript==
 // @name         Poke Idle World - Quality of Life (PIW-QOL) - Barra por local
 // @namespace    http://tampermonkey.net/
-// @version      10.2.2
-// @description  Suporte a ícones oficiais via items.json, botão de hunt nas Quests/Tasks e Hunt Analyzer sem travamentos. Atualizado para as novas diretrizes
-// @author       Desjunior (JulianoCLI) + JoeBrito 
+// @version      10.4.3
+// @description  Mercado e Depot fora das hunts, retorno rápido à cidade, buscas de itens e auto-reconnect resiliente.
+// @author       Desjunior (JulianoCLI)
+// @updater      JoeBrito
 // @match        https://poke.idleworld.online/play*
 // @grant        none
 // @run-at       document-start
+// @homepageURL  https://github.com/devjoebrito/QoL-PIW-Joe
+// @supportURL   https://github.com/devjoebrito/QoL-PIW-Joe/issues
+// @updateURL    https://raw.githubusercontent.com/devjoebrito/QoL-PIW-Joe/main/Poke%20Idle%20World%20-%20Quality%20of%20Life%20%28PIW-QOL%29%20-%20Joe%27s%20Version.js
+// @downloadURL  https://raw.githubusercontent.com/devjoebrito/QoL-PIW-Joe/main/Poke%20Idle%20World%20-%20Quality%20of%20Life%20%28PIW-QOL%29%20-%20Joe%27s%20Version.js
 // ==/UserScript==
 
 (function() {
@@ -26,13 +31,18 @@
     let autoReconnectInProgress = false;
     let lastCaptureBarSignature = '';
     let autoReconnectWasInHunt = false;
+    let lastKnownHuntContextAt = 0;
+    let huntActivityRevision = 0;
+    let consecutiveReconnectFailures = 0;
+    let nextAutoReconnectAt = 0;
     let lastAnalyzerXp = null;
     let lastAnalyzerXpChangeAt = Date.now();
+    const GAME_SOCKET_MESSAGE_TYPES = new Set(['inventory', 'family', 'pokes', 'pokes-get']);
 
     function isInHuntContext() {
         if (document.querySelector('[data-guide="capture-bar"], .hunt-ui, .battle-window, .wild-pokemon')) return true;
         const location = getCurrentHuntLocation?.() || currentHuntSnapshot?.locName || '';
-        if (location && !isCityName(location)) return true;
+        if (location && !isKnownNonHuntLocation(location)) return true;
         const analyzer = document.querySelector('.ha-window:not(.ha-compare-modal)');
         return Boolean(analyzer && !isCityName(getLastHunt()));
     }
@@ -44,7 +54,19 @@
         const payload = JSON.stringify(message).toLowerCase();
         return /"(?:expgained|xpgain|xp|experience|defeated|killed|damage|loot|drops?|reward)"\s*:\s*(?:[1-9]\d*|true|\[|\{)/.test(payload);
     }
-    function handleGameSocketMessage(event) {
+    function resetAutoReconnectFailures() {
+        consecutiveReconnectFailures = 0;
+        nextAutoReconnectAt = 0;
+    }
+
+    function markConfirmedHuntActivity(at = Date.now()) {
+        lastHuntSocketActivityAt = at;
+        huntActivityRevision += 1;
+        resetAutoReconnectFailures();
+        if (!bossMaxLogged) cancelScheduledAutoReconnectReload();
+    }
+
+    function handleGameSocketMessage(event, socket) {
         let message;
         try {
             message = JSON.parse(event.data);
@@ -52,10 +74,15 @@
             return;
         }
         lastSocketMessageAt = Date.now();
-        if (isBossSignalType(message?.type)) markBossContext('mensagem do jogo');
-        if (isHuntSocketMessage(message)) {
-            lastHuntSocketActivityAt = Date.now();
+        const huntMessage = isHuntSocketMessage(message);
+        // Caso o site passe a manter mais de um endpoint /ws, só promove a conexão
+        // que efetivamente fala o protocolo do jogo. A primeira conexão continua como
+        // fallback para não atrasar as requisições feitas logo no carregamento.
+        if (huntMessage || GAME_SOCKET_MESSAGE_TYPES.has(String(message?.type || ''))) {
+            gameSocket = socket;
         }
+        if (isBossSignalType(message?.type)) markBossContext('mensagem do jogo');
+        if (huntMessage) markConfirmedHuntActivity();
         if (message?.type === 'inventory') latestInventory = message.items || [];
         if (message?.type === 'family') latestFamily = message;
         if (message?.type === 'pokes') {
@@ -76,10 +103,10 @@
 
     function trackGameSocket(socket, url = socket?.url) {
         if (!socket || !String(url || '').includes('/ws')) return socket;
-        gameSocket = socket;
+        if (!gameSocket || gameSocket.readyState !== NativeWebSocket.OPEN) gameSocket = socket;
         if (trackedGameSockets.has(socket)) return socket;
         trackedGameSockets.add(socket);
-        socket.addEventListener('message', handleGameSocketMessage);
+        socket.addEventListener('message', event => handleGameSocketMessage(event, socket));
         socket.addEventListener('close', () => {
             if (gameSocket === socket) gameSocket = null;
         });
@@ -122,20 +149,30 @@
     // `enter-hunt` com o slug recoloca o personagem exatamente onde ele estava. Isso
     // substitui o antigo desvio por uma hunt de escala (Paras), que tirava o jogador
     // do lugar certo e ainda dependia de cliques no mapa para voltar.
-    const HUNT_SILENCE_MS = 10000;
+    // Batalhas iniciais podem demorar bastante sem emitir progresso. Trinta segundos
+    // evitam que um adversário apenas lento seja confundido com uma hunt travada.
+    const HUNT_SILENCE_MS = 30000;
     const HUNT_REENTRY_DELAY_MS = 500;
+    const HUNT_REENTRY_CONFIRM_MS = 30000;
     const RECONNECT_COOLDOWN_MS = 5000;
     const RECONNECT_CHECK_INTERVAL_MS = 1000;
+    const RECONNECT_BACKOFF_STEPS_MS = [10000, 20000, 40000];
+    const RECONNECT_MAX_ATTEMPTS = RECONNECT_BACKOFF_STEPS_MS.length + 1;
     // Com o socket fechado não há como enviar leave/enter; recarregar a página é a
     // única saída, e só depois de uma janela longa para não brigar com a reconexão
     // que o próprio jogo tenta fazer.
     const SOCKET_DOWN_RELOAD_MS = 45000;
+    // Mantém a memória de que esta aba estava numa hunt mesmo se a queda remover
+    // o HUD e a barra de captura. A folga maior também cobre timers atrasados em abas
+    // deixadas em segundo plano pelo navegador.
+    const HUNT_CONTEXT_LOSS_GRACE_MS = 5 * 60 * 1000;
     const HUNT_MESSAGE_TYPES = new Set(['field', 'field-init', 'field-kill', 'poke-xp', 'pending', 'catch-result']);
 
     let currentHuntSlug = null;
     let huntSlugRestored = false;
     let socketDownSince = 0;
     let reloadScheduled = false;
+    let reloadTimerId = null;
     let lastHuntNameRefreshAt = 0;
     let missingSlugLogged = false;
 
@@ -163,11 +200,18 @@
     // Uma boss que termine de um jeito que não observamos não pode desligar o watchdog
     // para sempre: o estado expira sozinho depois de um minuto sem nenhum sinal.
     const BOSS_CONTEXT_TTL_MS = 60000;
+    // Se a interface congelar exibindo uma boss, nunca enviamos leave-hunt. Depois
+    // deste teto conservador, um reload substitui a espera infinita.
+    const BOSS_CONTEXT_MAX_MS = 5 * 60 * 1000;
     let bossContextUntil = 0;
+    let bossContextStartedAt = 0;
+    let bossMaxLogged = false;
 
     function markBossContext(source) {
+        const now = Date.now();
         const wasActive = bossContextUntil > Date.now();
-        bossContextUntil = Date.now() + BOSS_CONTEXT_TTL_MS;
+        if (!bossContextStartedAt) bossContextStartedAt = now;
+        bossContextUntil = now + BOSS_CONTEXT_TTL_MS;
         if (!wasActive && isAutoReconnectActive()) {
             logAutoReconnectStatus(`Boss detectada (${source}); em espera até a luta terminar.`);
         }
@@ -178,15 +222,25 @@
         return BOSS_SIGNAL_PATTERN.test(clean) && !BOSS_BROADCAST_PATTERN.test(clean);
     }
 
+    function hasBossInterface() {
+        return Boolean(document.querySelector(BOSS_DOM_SELECTOR));
+    }
+
     function isBossContext() {
         if (bossContextUntil > Date.now()) return true;
         // A varredura no DOM só acontece quando não há sinal recente do socket, para
         // pegar a boss de quem abriu a página com a luta já em andamento.
-        if (document.querySelector(BOSS_DOM_SELECTOR)) {
+        if (hasBossInterface()) {
             markBossContext('interface');
             return true;
         }
+        bossContextStartedAt = 0;
+        bossMaxLogged = false;
         return false;
+    }
+
+    function isBossSafetyExpired() {
+        return Boolean(bossContextStartedAt && Date.now() - bossContextStartedAt >= BOSS_CONTEXT_MAX_MS);
     }
 
     function isHuntSocketMessage(message) {
@@ -199,16 +253,20 @@
         missingSlugLogged = false;
         currentHuntSlug = clean;
         huntSlugRestored = true;
-        localStorage.setItem(STORAGE_RECONNECT_SLUG, clean);
+        // sessionStorage pertence a esta aba, sobrevive a F5 e impede que outra aba
+        // substitua o destino de reconexão.
+        sessionStorage.setItem(STORAGE_RECONNECT_TAB_SLUG, clean);
     }
 
-    // O slug fica no localStorage porque o script pode ser recarregado (F5, atualização
-    // da extensão) no meio de uma hunt, quando o `enter-hunt` original já passou e não
-    // seria visto de novo.
+    // O slug fica no sessionStorage da aba porque o script pode ser recarregado (F5,
+    // atualização da extensão) no meio de uma hunt, quando o `enter-hunt` original já
+    // passou e não seria visto de novo.
     function getRememberedHuntSlug() {
         if (!huntSlugRestored) {
             huntSlugRestored = true;
-            currentHuntSlug = currentHuntSlug || localStorage.getItem(STORAGE_RECONNECT_SLUG) || null;
+            currentHuntSlug = currentHuntSlug
+                || sessionStorage.getItem(STORAGE_RECONNECT_TAB_SLUG)
+                || null;
             // Resíduo do auto-reconnect antigo, que guardava a hunt de retorno enquanto
             // fazia a parada intermediária. Nada mais lê essa chave.
             localStorage.removeItem('script_reconnect_pending_v1');
@@ -216,16 +274,19 @@
         return currentHuntSlug;
     }
 
-    // O HUD é a única fonte que fala desta aba; o slug lembrado mora no localStorage,
-    // que é compartilhado com as outras abas do jogo e pode ter sido gravado por uma
-    // delas. Por isso o local exibido agora tem prioridade, e o valor lembrado só entra
-    // quando o HUD não diz nada — justamente o caso em que a conexão caiu.
+    // O HUD continua tendo prioridade sobre o slug da sessão, porque ele informa se o
+    // jogador saiu da hunt dentro desta mesma aba. O valor lembrado só entra quando o
+    // HUD não diz nada — justamente o caso em que a conexão caiu.
     async function resolveCurrentHuntSlug() {
         const location = getCurrentHuntLocation();
         if (!location) return getRememberedHuntSlug();
-        if (isCityName(location)) return null;
+        if (isKnownNonHuntLocation(location)) return null;
         await loadMapMarkersData();
-        const slug = getMarkerSlug(findMappedHunt(location));
+        const marker = findMappedHunt(location);
+        // O catálogo do mapa identifica cidades novas por seus metadados, sem exigir
+        // que o nome seja adicionado manualmente à expressão CITY_NAMES.
+        if (marker && isCityMarker(marker, location)) return null;
+        const slug = getMarkerSlug(marker);
         if (slug) {
             rememberHuntSlug(slug);
             return slug;
@@ -245,6 +306,7 @@
         } catch {
             return;
         }
+        if (message?.type === 'enter-hunt' || message?.type === 'leave-hunt') gameSocket = socket;
         if (isBossSignalType(message?.type)) markBossContext('ação do jogador');
         if (message?.type === 'enter-hunt' && message.slug) {
             rememberHuntSlug(message.slug);
@@ -257,9 +319,61 @@
         logger(`[PIW-QOL] Auto-reconnect: ${message}`);
     }
 
+    function cancelScheduledAutoReconnectReload() {
+        if (reloadTimerId !== null) clearTimeout(reloadTimerId);
+        reloadTimerId = null;
+        reloadScheduled = false;
+    }
+
+    function scheduleAutoReconnectReload(message, delayMs = 1500) {
+        if (reloadScheduled) return false;
+        reloadScheduled = true;
+        logAutoReconnectStatus(message, true);
+        reloadTimerId = setTimeout(() => {
+            reloadTimerId = null;
+            if (!isAutoReconnectActive()) {
+                reloadScheduled = false;
+                return;
+            }
+            location.reload();
+        }, delayMs);
+        return true;
+    }
+
+    async function waitForHuntRecovery(activityRevision, timeoutMs = HUNT_REENTRY_CONFIRM_MS) {
+        const deadline = Date.now() + timeoutMs;
+        while (Date.now() < deadline) {
+            if (!gameSocket || gameSocket.readyState !== NativeWebSocket.OPEN) return false;
+            if (huntActivityRevision > activityRevision) return true;
+            await new Promise(resolve => setTimeout(resolve, 100));
+        }
+        return false;
+    }
+
+    function registerReconnectFailure(slug) {
+        consecutiveReconnectFailures += 1;
+        lastHuntSocketActivityAt = Date.now();
+
+        if (consecutiveReconnectFailures >= RECONNECT_MAX_ATTEMPTS) {
+            scheduleAutoReconnectReload(
+                `A reentrada em ${slug} não foi confirmada após ${consecutiveReconnectFailures} tentativas; recarregando a página.`
+            );
+            return;
+        }
+
+        const backoffMs = RECONNECT_BACKOFF_STEPS_MS[consecutiveReconnectFailures - 1];
+        nextAutoReconnectAt = Date.now() + backoffMs;
+        logAutoReconnectStatus(
+            `A reentrada em ${slug} não produziu atividade da hunt. Nova tentativa em ${Math.round(backoffMs / 1000)} segundos `
+            + `(${consecutiveReconnectFailures}/${RECONNECT_MAX_ATTEMPTS}).`,
+            true
+        );
+    }
+
     // Sai e volta para a mesma hunt pelo WebSocket. O `leave-hunt` é enviado pelo
     // socket direto (sendGameMessage), então passa pelo mesmo patch de envio — por
-    // isso nada aqui zera o slug lembrado.
+    // isso nada aqui zera o slug lembrado. O envio de enter-hunt só conta como sucesso
+    // depois que uma nova mensagem de progresso da hunt chega pelo WebSocket.
     async function rejoinCurrentHunt(reason) {
         if (autoReconnectInProgress || isBossContext()) return false;
         // A trava e o cooldown são marcados antes de qualquer await: resolver o slug
@@ -270,12 +384,14 @@
         try {
             const slug = await resolveCurrentHuntSlug();
             if (!slug) {
+                if (isKnownNonHuntLocation(getCurrentHuntLocation())) return false;
                 // Um aviso por episódio: o cooldown sozinho ainda repetiria a mensagem
                 // a cada cinco segundos enquanto o lugar não for reconhecido.
                 if (!missingSlugLogged) {
                     missingSlugLogged = true;
                     logAutoReconnectStatus('A hunt atual não pôde ser identificada; entre nela de novo pelo mapa.', true);
                 }
+                nextAutoReconnectAt = Date.now() + 60000;
                 return false;
             }
             missingSlugLogged = false;
@@ -285,36 +401,96 @@
                 return false;
             }
             await new Promise(resolve => setTimeout(resolve, HUNT_REENTRY_DELAY_MS));
+            const activityRevisionBeforeEnter = huntActivityRevision;
+            const captureBarBeforeEnter = document.querySelector('[data-guide="capture-bar"]')?.innerHTML || '';
             const entered = sendGameMessage({ type: 'enter-hunt', slug });
             lastHuntSocketActivityAt = Date.now();
-            lastCaptureBarSignature = document.querySelector('[data-guide="capture-bar"]')?.innerHTML || '';
-            if (entered) logAutoReconnectStatus(`${reason} Reentrei em ${slug}.`);
-            else logAutoReconnectStatus(`${reason} O reenvio de enter-hunt para ${slug} falhou.`, true);
-            return entered;
+            lastCaptureBarSignature = captureBarBeforeEnter;
+            if (!entered) {
+                logAutoReconnectStatus(`${reason} O reenvio de enter-hunt para ${slug} falhou.`, true);
+                return false;
+            }
+
+            const confirmed = await waitForHuntRecovery(activityRevisionBeforeEnter);
+            if (confirmed) {
+                resetAutoReconnectFailures();
+                logAutoReconnectStatus(`${reason} Reentrada em ${slug} confirmada pelo jogo.`);
+                return true;
+            }
+            if (!gameSocket || gameSocket.readyState !== NativeWebSocket.OPEN) {
+                logAutoReconnectStatus(`O WebSocket caiu enquanto a reentrada em ${slug} era confirmada.`, true);
+                return false;
+            }
+            registerReconnectFailure(slug);
+            return false;
+        } catch (error) {
+            logAutoReconnectStatus(`Falha inesperada ao reentrar na hunt: ${error?.message || error}`, true);
+            if (gameSocket?.readyState === NativeWebSocket.OPEN) registerReconnectFailure(currentHuntSlug || 'hunt atual');
+            return false;
         } finally {
             autoReconnectInProgress = false;
         }
     }
 
     setInterval(async () => {
+        const now = Date.now();
         const captureBar = document.querySelector('[data-guide="capture-bar"]');
+        const socketOpen = gameSocket?.readyState === NativeWebSocket.OPEN;
+        const currentLocation = getCurrentHuntLocation();
+        const knownNonHuntLocation = isKnownNonHuntLocation(currentLocation);
         const inHunt = isInHuntContext();
-        if (!inHunt) { autoReconnectWasInHunt = false; return; }
-        if (!autoReconnectWasInHunt) {
-            autoReconnectWasInHunt = true;
-            lastHuntSocketActivityAt = Date.now();
+
+        if (knownNonHuntLocation) {
+            autoReconnectWasInHunt = false;
+            lastKnownHuntContextAt = 0;
+            socketDownSince = 0;
+            resetAutoReconnectFailures();
             return;
         }
-        if (!isAutoReconnectActive() || autoReconnectInProgress) return;
-        // Numa boss o `leave-hunt` abandonaria a luta — e o token gasto nela. O
-        // watchdog inteiro fica em espera, inclusive o reload por socket fechado, e o
-        // relógio de silêncio é zerado para a luta terminar com os 10 segundos cheios.
-        if (isBossContext()) {
-            lastHuntSocketActivityAt = Date.now();
+
+        if (inHunt) {
+            lastKnownHuntContextAt = now;
+            if (!autoReconnectWasInHunt) {
+                autoReconnectWasInHunt = true;
+                lastHuntSocketActivityAt = now;
+                resetAutoReconnectFailures();
+                return;
+            }
+        } else {
+            // Uma queda pode desmontar todo o HUD. Enquanto o socket estiver fechado,
+            // conserva o contexto anterior tempo suficiente para executar o reload.
+            const mayRecoverMissingInterface = autoReconnectWasInHunt
+                && !socketOpen
+                && now - lastKnownHuntContextAt <= HUNT_CONTEXT_LOSS_GRACE_MS;
+            if (!mayRecoverMissingInterface) {
+                autoReconnectWasInHunt = false;
+                lastKnownHuntContextAt = 0;
+                socketDownSince = 0;
+                resetAutoReconnectFailures();
+                return;
+            }
+        }
+
+        if (!isAutoReconnectActive()) {
             socketDownSince = 0;
             return;
         }
-        const now = Date.now();
+        if (autoReconnectInProgress) return;
+        // Numa boss o `leave-hunt` abandonaria a luta — e o token gasto nela. O
+        // watchdog fica em espera. Se a interface permanecer congelada por cinco
+        // minutos, a saída segura é recarregar a página, nunca enviar leave-hunt.
+        if (isBossContext()) {
+            lastHuntSocketActivityAt = now;
+            socketDownSince = 0;
+            resetAutoReconnectFailures();
+            // O TTL pode atravessar o final de uma boss longa. Só aplica o teto se a
+            // interface ainda estiver presa na tela ou se o socket realmente caiu.
+            if (isBossSafetyExpired() && (hasBossInterface() || !socketOpen) && !bossMaxLogged) {
+                bossMaxLogged = true;
+                scheduleAutoReconnectReload('A interface da boss permaneceu ativa por cinco minutos; recarregando sem enviar leave-hunt.');
+            }
+            return;
+        }
         // A verificação roda a cada segundo, mas o nome da hunt muda raramente: relê o
         // HUD só de cinco em cinco segundos para não gravar no localStorage a cada tick.
         if (now - lastHuntNameRefreshAt >= 5000) {
@@ -322,14 +498,12 @@
             rememberCurrentHuntFromHud();
         }
 
-        if (!gameSocket || gameSocket.readyState !== NativeWebSocket.OPEN) {
+        if (!socketOpen) {
             if (!socketDownSince) {
                 socketDownSince = now;
                 logAutoReconnectStatus('WebSocket caiu; aguardando a reconexão do jogo.', true);
-            } else if (!reloadScheduled && now - socketDownSince >= SOCKET_DOWN_RELOAD_MS) {
-                reloadScheduled = true;
-                logAutoReconnectStatus('WebSocket continua fechado; recarregando a página.', true);
-                setTimeout(() => location.reload(), 1500);
+            } else if (now - socketDownSince >= SOCKET_DOWN_RELOAD_MS) {
+                scheduleAutoReconnectReload('WebSocket continua fechado; recarregando a página.');
             }
             return;
         }
@@ -338,15 +512,16 @@
         const captureBarSignature = captureBar?.innerHTML || '';
         if (captureBar && captureBarSignature !== lastCaptureBarSignature) {
             lastCaptureBarSignature = captureBarSignature;
-            lastHuntSocketActivityAt = now;
+            markConfirmedHuntActivity(now);
         }
         if (now - lastHuntSocketActivityAt < HUNT_SILENCE_MS) return;
         if (now - lastAutoReconnectAt < RECONNECT_COOLDOWN_MS) return;
+        if (now < nextAutoReconnectAt) return;
         // A janela de análise aberta mantém isInHuntContext() verdadeiro mesmo com o
         // personagem parado numa cidade; reentrar na hunt ali seria arrastá-lo para
         // fora do lugar onde ele escolheu ficar.
-        if (isCityName(getCurrentHuntLocation())) return;
-        await rejoinCurrentHunt('Hunt sem resposta por 10 segundos.');
+        if (isKnownNonHuntLocation(currentLocation)) return;
+        await rejoinCurrentHunt('Hunt sem resposta por 30 segundos.');
     }, RECONNECT_CHECK_INTERVAL_MS);
 
     async function requestFreshGameEvent(type, requestType, { timeoutMs = 3500, attempts = 2 } = {}) {
@@ -402,7 +577,6 @@
     const STORAGE_DEX_FILTER = 'script_dex_filter_v1';
     const STORAGE_DEX_SORT_VALUE = 'script_dex_sort_value_v1';
     const STORAGE_CAUGHT_POKEMON = 'script_caught_pokemon_v1';
-    const STORAGE_HUNT_MARKET = 'script_hunt_market_v1';
     const STORAGE_HUNT_BULK_BUY = 'script_hunt_bulk_buy_v1';
     const STORAGE_HUNT_SELL = 'script_hunt_sell_v1';
     const STORAGE_MARK_ENHANCEMENTS = 'script_mark_enhancements_v1';
@@ -411,7 +585,7 @@
     const STORAGE_PRIMARY_FAVORITE = 'script_primary_favorite_v1';
     const STORAGE_GAME_FONT = 'script_game_font_v1';
     const STORAGE_AUTO_RECONNECT = 'script_auto_reconnect_v1';
-    const STORAGE_RECONNECT_SLUG = 'script_reconnect_hunt_slug_v1';
+    const STORAGE_RECONNECT_TAB_SLUG = 'script_reconnect_hunt_slug_tab_v1';
     const STORAGE_CUSTOM_SCROLLBARS = 'script_custom_scrollbars_v1';
     const STORAGE_UNIFIED_FONTS = 'script_unified_fonts_v1';
     const STORAGE_COMPARE_WINDOW = 'script_compare_window_v1';
@@ -544,7 +718,6 @@
             protectLegendary: 'Desmarcar Pokémon lendários (aba Pokémon)',
             sellConfirmation: 'Itens com confirmação de venda',
             huntFeatures: 'Recursos da Hunt', huntFeaturesDesc: 'Escolha quais melhorias aparecem enquanto estiver em uma hunt.',
-            marketHud: 'HUD do Mercado Global', marketHudDesc: 'Consulta anúncios sem precisar sair da hunt.',
             bulkBuy: 'Compras +1.000/+10.000', bulkBuyDesc: 'Adiciona quantidades grandes à loja de Poké Bolas.',
             huntSell: 'Venda na Hunt', huntSellDesc: 'Permite vender itens e Pokémon pela loja da hunt.',
             cityMark: 'Melhorias do Mark', cityMarkDesc: 'Quantidades, cadeados e confirmações na loja da cidade.',
@@ -578,7 +751,6 @@
             protectLegendary: 'Deselect legendary Pokémon (Pokémon tab)',
             sellConfirmation: 'Sell Confirmation Items',
             huntFeatures: 'Hunt Features', huntFeaturesDesc: 'Choose which enhancements are available while inside a hunt.',
-            marketHud: 'Global Market HUD', marketHudDesc: 'Browse listings without leaving the hunt.',
             bulkBuy: '+1,000/+10,000 purchases', bulkBuyDesc: 'Adds large quantities to the Poké Ball shop.',
             huntSell: 'Hunt Selling', huntSellDesc: 'Sell items and Pokémon from the hunt shop.',
             cityMark: 'Mark Enhancements', cityMarkDesc: 'Quantities, locks and confirmations in the city shop.',
@@ -1316,13 +1488,12 @@
             padding: 8px 6px; z-index: 9000;
             backdrop-filter: blur(4px);
         }
-        #script-sidebar[data-location="unknown"] .script-sidebar-wrap,
-        #script-sidebar[data-location="unknown"] #dock-btn-depot,
         #script-sidebar[data-location="hunt"] .script-sidebar-wrap,
-        #script-sidebar[data-location="hunt"] #dock-btn-depot {
+        #script-sidebar[data-location="hunt"] #dock-btn-depot,
+        #script-sidebar:not([data-location="hunt"]) #dock-btn-city {
             display: none !important;
         }
-        #dock-btn-quick-tp, #dock-btn-shops, #dock-btn-depot {
+        #dock-btn-quick-tp, #dock-btn-shops, #dock-btn-depot, #dock-btn-city {
             background: transparent;
             border: 0;
             box-shadow: none;
@@ -1330,7 +1501,7 @@
             width: 36px; height: 36px; border-radius: 8px; cursor: pointer;
             transition: background .15s;
         }
-        #dock-btn-quick-tp:hover, #dock-btn-shops:hover, #dock-btn-depot:hover {
+        #dock-btn-quick-tp:hover, #dock-btn-shops:hover, #dock-btn-depot:hover, #dock-btn-city:hover {
             background: rgba(255,255,255,.12);
         }
         #dock-btn-quick-tp[hidden] { display: none !important; }
@@ -1339,6 +1510,7 @@
         #dock-btn-quick-tp { color: #ffcc00; font-size: 16px; font-weight: bold; }
         #dock-btn-shops { color: #9ae6b4; font-size: 15px; }
         #dock-btn-depot { color: #90cdf4; font-size: 15px; }
+        #dock-btn-city { font-size: 20px; line-height: 1; }
         .script-sidebar-wrap { position: relative; display: flex; align-items: center; }
         .script-sidebar-wrap .poke-menu[hidden] { display: none !important; }
         .script-sidebar-wrap .poke-menu {
@@ -1750,6 +1922,17 @@
             border: 1px solid rgba(255, 255, 255, .05);
             border-radius: 8px;
         }
+        .portable-depot-item-filters {
+            flex-basis: 100%;
+            display: grid;
+            grid-template-columns: minmax(220px, 1fr) auto;
+            gap: 6px;
+            padding: 9px;
+            background: rgba(255, 255, 255, .02);
+            border: 1px solid rgba(255, 255, 255, .05);
+            border-radius: 8px;
+        }
+        .portable-depot-item-filters input { min-width: 0; }
         .portable-depot-clear-filters { min-height: 28px; padding: 5px 10px; cursor: pointer; }
         .portable-shop-heading {
             margin: 8px 0 0;
@@ -1761,6 +1944,7 @@
         @media (max-width: 760px) {
             .portable-depot-poke-filters { grid-template-columns: 1fr 1fr; }
             .portable-depot-poke-filters input:first-child { grid-column: 1 / -1; }
+            .portable-depot-item-filters { grid-template-columns: minmax(0, 1fr) auto; }
         }
 
         .dex-script-controls { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; padding: 6px 10px; border-top: 1px solid #1a2d3a; }
@@ -2059,8 +2243,6 @@
             .finally(() => { caughtPokedexPromise = null; });
         return caughtPokedexPromise;
     }
-    function isHuntMarketActive() { return localStorage.getItem(STORAGE_HUNT_MARKET) !== 'false'; }
-    function setHuntMarketActive(val) { localStorage.setItem(STORAGE_HUNT_MARKET, val ? 'true' : 'false'); }
     function isHuntBulkBuyActive() { return localStorage.getItem(STORAGE_HUNT_BULK_BUY) !== 'false'; }
     function setHuntBulkBuyActive(val) { localStorage.setItem(STORAGE_HUNT_BULK_BUY, val ? 'true' : 'false'); }
     function isHuntSellActive() { return localStorage.getItem(STORAGE_HUNT_SELL) !== 'false'; }
@@ -2158,8 +2340,17 @@
     const CITY_NAMES = /\b(?:cerulean(?: city)?|pewter(?: city)?|lavender(?: town)?|viridian(?: city)?|cassino|casino)\b/i;
     function isCityName(name) { return CITY_NAMES.test(String(name || '').replace(/\[[^\]]*]/g, ' ').trim()); }
     function isCityMarker(marker, name) {
-        const metadata = `${marker?.className || ''} ${marker?.dataset?.type || ''} ${marker?.dataset?.tag || ''} ${marker?.dataset?.category || ''}`;
-        return isCityName(name) || /\b(?:city|cidade|town)\b/i.test(metadata);
+        const metadata = [
+            marker?.className, marker?.type, marker?.kind, marker?.tag, marker?.category,
+            marker?.locationType, marker?.dataset?.type, marker?.dataset?.tag, marker?.dataset?.category
+        ].filter(Boolean).join(' ');
+        return marker?.isCity === true || isCityName(name) || /\b(?:city|cidade|town)\b/i.test(metadata);
+    }
+    function isKnownNonHuntLocation(name) {
+        if (!name) return false;
+        if (isCityName(name)) return true;
+        const marker = findMappedHunt(name);
+        return Boolean(marker && isCityMarker(marker, name));
     }
     function getCityDisplayName(name) {
         if (/pewter|lavender/i.test(name)) return 'Lavender (Pewter)';
@@ -2374,14 +2565,18 @@
         else if (mode === 'last') teleportToLastHunt();
     }
 
-    // O HUD indica a posição atual mesmo quando o mapa está fechado. Na ausência
-    // dessa informação, apenas a estrela aparece para não oferecer Depot por engano.
+    // O HUD indica a posição atual mesmo quando o mapa está fechado. Um marcador
+    // conhecido ou a interface de batalha confirmam a hunt; outros locais, como o
+    // mapa do Mercado, mantêm Mercado e Depot disponíveis.
     function getSidebarLocation() {
         const location = getCurrentHuntLocation();
         if (location) {
             const clean = location.replace(/\[[^\]]*]/g, ' ').trim();
-            return /^(?:cerulean(?: city)?|pewter(?: city)?|lavender(?: town)?|viridian(?: city)?|cassino|casino)$/i.test(clean)
-                ? 'city' : 'hunt';
+            if (isCityName(clean)) return 'city';
+            const marker = findMappedHunt(clean);
+            if (marker && !isCityMarker(marker, clean)) return 'hunt';
+            if (document.querySelector('[data-guide="capture-bar"], .hunt-ui, .battle-window, .wild-pokemon')) return 'hunt';
+            return 'other';
         }
         if (document.querySelector('[data-guide="capture-bar"], .hunt-ui, .battle-window, .wild-pokemon')) return 'hunt';
         return 'unknown';
@@ -2393,9 +2588,10 @@
         const location = getSidebarLocation();
         if (sidebar.dataset.location !== location) {
             sidebar.dataset.location = location;
-            if (location !== 'city') {
+            if (location === 'hunt') {
                 sidebar.querySelectorAll('.script-shop-menu').forEach(menu => { menu.hidden = true; });
                 document.querySelector('.portable-depot-backdrop')?.remove();
+                document.querySelector('.script-market-backdrop')?.remove();
             }
         }
         updateNavButtonAppearance();
@@ -2420,6 +2616,18 @@
         tpBtn.title = mode === 'fav'
             ? `Teleportar para ${primary || 'Hunt Favorita'}${getFavorites().length > 1 ? ' · botão direito para escolher' : ''}`
             : 'Teleportar para Última Hunt';
+    }
+
+    async function returnToMainCity() {
+        const button = document.getElementById('dock-btn-city');
+        if (button?.disabled) return;
+        if (button) button.disabled = true;
+        try {
+            const moved = await teleportToTarget('Cerulean', { silent: true });
+            if (!moved) showScriptNotice('Não foi possível localizar Cerulean no mapa.', { isError: true });
+        } finally {
+            if (button) button.disabled = false;
+        }
     }
 
     function injectQuickTPButton() {
@@ -2504,6 +2712,18 @@
             depotButton.title = 'Depot';
             depotButton.addEventListener('click', showPortableDepot);
             sidebar.appendChild(depotButton);
+        }
+
+        if (!document.getElementById('dock-btn-city')) {
+            const cityButton = document.createElement('button');
+            cityButton.id = 'dock-btn-city';
+            cityButton.className = 'dock-btn';
+            cityButton.type = 'button';
+            cityButton.title = 'Voltar para Cerulean';
+            cityButton.setAttribute('aria-label', 'Voltar para Cerulean');
+            cityButton.textContent = '🏠';
+            cityButton.addEventListener('click', returnToMainCity);
+            sidebar.appendChild(cityButton);
         }
         syncSidebarLocation();
     }
@@ -2624,13 +2844,12 @@
                         toggleRow({
                             className: 'cfg-auto-reconnect', checked: isAutoReconnectActive(),
                             title: 'Auto-reconnect da hunt',
-                            description: 'Quando a hunt fica 10 segundos sem responder, sai e entra de novo na mesma hunt pelo WebSocket, sem passar por outra hunt. Fica em espera durante bosses.'
+                            description: 'Quando a hunt fica 30 segundos sem responder, sai e entra na mesma hunt, aguarda até 30 segundos pela confirmação e aumenta o intervalo entre novas tentativas. Durante bosses, nunca envia leave-hunt.'
                         }),
                         prefToggle('cfg-compare-window', STORAGE_COMPARE_WINDOW, 'Comparação de hunts', 'Exibe a janela móvel e redimensionável de comparação.'),
                         sublistRow({
                             title: tr('huntFeatures'), description: tr('huntFeaturesDesc'),
                             items: [
-                                ['btn-hunt-market', isHuntMarketActive(), tr('marketHud'), tr('marketHudDesc')],
                                 ['btn-hunt-bulk', isHuntBulkBuyActive(), tr('bulkBuy'), tr('bulkBuyDesc')],
                                 ['btn-hunt-sell', isHuntSellActive(), tr('huntSell'), tr('huntSellDesc')]
                             ]
@@ -2744,9 +2963,14 @@
             modsContent.querySelector('.cfg-auto-reconnect').checked = isAutoReconnectActive();
             modsContent.querySelector('.cfg-auto-reconnect').addEventListener('change', event => {
                 localStorage.setItem(STORAGE_AUTO_RECONNECT, String(event.target.checked));
+                socketDownSince = 0;
+                resetAutoReconnectFailures();
                 if (event.target.checked) {
                     lastHuntSocketActivityAt = Date.now();
                     lastCaptureBarSignature = document.querySelector('[data-guide="capture-bar"]')?.innerHTML || '';
+                } else {
+                    bossMaxLogged = false;
+                    cancelScheduledAutoReconnectReload();
                 }
             });
             modsContent.querySelectorAll('[data-pref-key]').forEach(control => control.addEventListener('change', event => {
@@ -2809,11 +3033,6 @@
             modsContent.querySelector('.btn-guard-leg').addEventListener('change', (e) => {
                 setGuardLegendary(e.target.checked);
             });
-            modsContent.querySelector('.btn-hunt-market').addEventListener('change', e => {
-                setHuntMarketActive(e.target.checked);
-                injectHuntShopLauncher();
-                if (!e.target.checked) document.querySelector('.script-market-backdrop')?.remove();
-            });
             modsContent.querySelector('.btn-hunt-bulk').addEventListener('change', e => {
                 setHuntBulkBuyActive(e.target.checked);
                 const ballWindow = document.querySelector('.ball-window');
@@ -2821,7 +3040,7 @@
             });
             modsContent.querySelector('.btn-hunt-sell').addEventListener('change', e => {
                 setHuntSellActive(e.target.checked);
-                injectHuntShopLauncher();
+                suppressHuntServiceIcons();
                 const ballWindow = document.querySelector('.ball-window');
                 if (ballWindow) injectHuntBallEnhancements(ballWindow);
             });
@@ -3733,8 +3952,8 @@
     }
 
     async function showPortableDepot() {
-        if (getSidebarLocation() !== 'city') {
-            showScriptNotice('O Depot está disponível apenas na cidade.');
+        if (getSidebarLocation() === 'hunt') {
+            showScriptNotice('O Depot não está disponível durante hunts.');
             return;
         }
         document.querySelector('.portable-depot-backdrop')?.remove();
@@ -3775,6 +3994,8 @@
         let busy = false;
         const depotPokeFilters = { name: '', ivMin: '', ivMax: '', qualityMin: '', qualityMax: '' };
         const familyPokeFilters = { name: '', ivMin: '', ivMax: '', qualityMin: '', qualityMax: '' };
+        const depotItemFilters = { name: '' };
+        const familyItemFilters = { name: '' };
 
         const familyAction = async payload => {
             if (busy || !familyData?.family) return;
@@ -3926,6 +4147,43 @@
             return true;
         });
 
+        const normalizeDepotItemSearch = value => String(value || '')
+            .normalize('NFKD')
+            .replace(/[\u0300-\u036f]/g, '')
+            .toLocaleLowerCase()
+            .trim();
+
+        const filterDepotItems = (entries, filters) => {
+            const query = normalizeDepotItemSearch(filters.name);
+            if (!query) return entries;
+            return entries.filter(entry => normalizeDepotItemSearch(
+                entry.name || `Item #${entry.itemId ?? entry.id ?? ''}`
+            ).includes(query));
+        };
+
+        const makeDepotItemFilters = (filters, placeholder) => {
+            const controls = document.createElement('div');
+            controls.className = 'portable-depot-item-filters';
+            controls.innerHTML = `
+                <input type="search" class="portable-depot-item-search" placeholder="${escapeHTML(placeholder)}" autocomplete="off">
+                <button type="button" class="portable-depot-clear-filters">Limpar</button>`;
+            const input = controls.querySelector('.portable-depot-item-search');
+            input.value = filters.name;
+            input.addEventListener('input', () => {
+                filters.name = input.value;
+                render();
+                const replacement = content.querySelector('.portable-depot-item-search');
+                replacement?.focus();
+                replacement?.setSelectionRange?.(replacement.value.length, replacement.value.length);
+            });
+            controls.querySelector('.portable-depot-clear-filters').addEventListener('click', () => {
+                filters.name = '';
+                render();
+                content.querySelector('.portable-depot-item-search')?.focus();
+            });
+            return controls;
+        };
+
         const makeDepotPokemonFilters = filters => {
             const controls = document.createElement('div');
             controls.className = 'portable-depot-poke-filters';
@@ -4060,9 +4318,12 @@
             content.innerHTML = '';
             content.style.cssText = 'display:flex;gap:12px;flex-wrap:wrap;';
             if (activeTab === 'items') {
+                content.appendChild(makeDepotItemFilters(depotItemFilters, 'Buscar item no Depot e na mochila'));
+                const bag = filterDepotItems(depotData?.inventory || [], depotItemFilters);
+                const stored = filterDepotItems(depotData?.depot || [], depotItemFilters);
                 content.append(
-                    makeColumn('Mochila', depotData?.inventory || [], 'store', 'A mochila está vazia.'),
-                    makeColumn(`Depot · ${depotData?.depot?.length || 0}/${depotData?.maxSlots || 0}`, depotData?.depot || [], 'withdraw', 'O Depot está vazio.')
+                    makeColumn('Mochila', bag, 'store', depotItemFilters.name ? 'Nenhum item corresponde à pesquisa.' : 'A mochila está vazia.'),
+                    makeColumn(`Depot · ${depotData?.depot?.length || 0}/${depotData?.maxSlots || 0}`, stored, 'withdraw', depotItemFilters.name ? 'Nenhum item corresponde à pesquisa.' : 'O Depot está vazio.')
                 );
             } else if (activeTab === 'pokemon') {
                 content.appendChild(makeDepotPokemonFilters(depotPokeFilters));
@@ -4074,16 +4335,31 @@
                 );
             } else if (activeTab === 'family-items') {
                 renderFamilyHeader();
-                const inventoryById = new Map((depotData?.inventory || []).map(item => [String(item.id), item]));
+                content.appendChild(makeDepotItemFilters(familyItemFilters, 'Buscar item na mochila e na Família'));
+                const itemReferences = [...(depotData?.inventory || []), ...(depotData?.depot || [])];
+                const inventoryById = new Map(itemReferences.map(item => [String(item.itemId ?? item.id), item]));
+                const enrichFamilyItem = item => {
+                    const itemId = item.itemId ?? item.id;
+                    const reference = inventoryById.get(String(itemId)) || globalItemApiData.get(String(itemId));
+                    return {
+                        ...item,
+                        itemId,
+                        id: item.id ?? itemId,
+                        name: item.name || reference?.name || `Item #${itemId}`,
+                        icon: item.icon || reference?.icon || ''
+                    };
+                };
                 const bag = inventory.filter(item => Number(item.quantity) > 0).map(item => ({
                     ...item,
                     id: item.itemId,
                     name: inventoryById.get(String(item.itemId))?.name || globalItemApiData.get(String(item.itemId))?.name || `Item #${item.itemId}`,
                     icon: inventoryById.get(String(item.itemId))?.icon || globalItemApiData.get(String(item.itemId))?.icon || ''
                 }));
+                const filteredBag = filterDepotItems(bag, familyItemFilters);
+                const stored = filterDepotItems((familyData?.depot?.items || []).map(enrichFamilyItem), familyItemFilters);
                 content.append(
-                    makeFamilyColumn('Sua mochila', bag, 'deposit', 'item'),
-                    makeFamilyColumn('Depósito da família', familyData?.depot?.items || [], 'withdraw', 'item')
+                    makeFamilyColumn('Sua mochila', filteredBag, 'deposit', 'item'),
+                    makeFamilyColumn('Depósito da família', stored, 'withdraw', 'item')
                 );
             } else if (activeTab === 'family-pokemon') {
                 renderFamilyHeader();
@@ -5040,24 +5316,11 @@
         load();
     }
 
-    function injectHuntShopLauncher() {
+    function suppressHuntServiceIcons() {
         const captureBar = document.querySelector('[data-guide="capture-bar"]');
         if (!captureBar) return;
-        const captureShopLink = captureBar.querySelector('.cap-shop-link');
-        if (captureShopLink) captureShopLink.style.display = 'none';
-        let marketButton = captureBar.querySelector('.script-open-global-market');
-        if (!isHuntMarketActive()) {
-            marketButton?.remove();
-            return;
-        }
-        if (!marketButton) {
-            marketButton = document.createElement('button');
-            marketButton.type = 'button';
-            marketButton.className = 'cap-shop-link script-open-global-market';
-            marketButton.textContent = `🌐 ${tr('globalMarket')}`;
-            marketButton.addEventListener('click', showGlobalMarketWindow);
-            captureBar.appendChild(marketButton);
-        }
+        captureBar.querySelectorAll('.script-open-global-market').forEach(button => button.remove());
+        captureBar.querySelectorAll('.cap-shop-link').forEach(link => { link.style.display = 'none'; });
     }
 
     let ballCatalogPromise = null;
@@ -6664,7 +6927,7 @@
             injectQuickTPButton();
             if (document.querySelector('.cfg-window')) injectConfigTab();
             applyChatState();
-            injectHuntShopLauncher();
+            suppressHuntServiceIcons();
             if (findNativeMarkWindow() && isMarkEnhancementsActive()) injectShopEnhancements();
             if (document.querySelector('.ball-window')) injectHuntBallEnhancements(document.querySelector('.ball-window'));
             if (document.querySelector('.dex-window')) injectDexEnhancements();
