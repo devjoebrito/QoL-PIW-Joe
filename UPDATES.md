@@ -8,6 +8,15 @@ As versões seguem o formato `MAJOR.MINOR.PATCH`:
 - **MINOR:** nova função ou revisão importante;
 - **PATCH:** correção pequena sem mudança relevante de uso.
 
+## 10.5.1 — 07/10/2026
+
+### Capturas atualizadas em tempo real
+
+- O filtro **Não Capturados** passa a reconhecer uma nova captura sem precisar recarregar a página.
+- O evento `catch-result` atualiza imediatamente o cache local quando confirma uma captura.
+- Alterações no contador do Hunt Analyzer funcionam como uma segunda confirmação em tempo real.
+- A API da Pokédex é consultada em seguida para validar o estado oficial, com agrupamento de requisições para evitar consultas excessivas.
+
 ## 10.5.0 — 07/10/2026
 
 ### Filtros persistentes no mapa de hunts

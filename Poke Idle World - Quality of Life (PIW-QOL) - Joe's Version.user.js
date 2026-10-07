@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Poke Idle World - Quality of Life (PIW-QOL) - Joe's Version
 // @namespace    http://tampermonkey.net/
-// @version      10.5.0
+// @version      10.5.1
 // @description  Mercado e Depot fora das hunts, retorno rápido à cidade, buscas de itens e auto-reconnect resiliente.
 // @author       Desjunior (JulianoCLI)
 // @updater      JoeBrito
@@ -83,6 +83,7 @@
         }
         if (isBossSignalType(message?.type)) markBossContext('mensagem do jogo');
         if (huntMessage) markConfirmedHuntActivity();
+        if (message?.type === 'catch-result') handleRealtimeCatchResult(message);
         if (message?.type === 'inventory') latestInventory = message.items || [];
         if (message?.type === 'family') latestFamily = message;
         if (message?.type === 'pokes') {
@@ -2232,18 +2233,81 @@
     function saveCaughtPokemonCache() {
         localStorage.setItem(STORAGE_CAUGHT_POKEMON, JSON.stringify([...globalCaughtPokemonNames]));
     }
+    function markPokemonAsCaught(name) {
+        const cleanName = getCleanHuntName(name);
+        if (!cleanName || isCityName(cleanName)
+            || (!POKEMON_TYPES[cleanName] && !globalCreatureApiData.has(cleanName) && !globalHuntMarkerData.has(cleanName))) {
+            return false;
+        }
+        if (globalCaughtPokemonNames.has(cleanName)) return false;
+        globalCaughtPokemonNames.add(cleanName);
+        saveCaughtPokemonCache();
+        lastMapRenderSignature = '';
+        setTimeout(buildSimpleList, 0);
+        return true;
+    }
+
+    function getCatchResultSuccess(message) {
+        const containers = [message, message?.result, message?.data, message?.payload]
+            .filter(value => value && typeof value === 'object');
+        for (const container of containers) {
+            for (const key of ['caught', 'captured', 'success', 'successful']) {
+                if (!Object.prototype.hasOwnProperty.call(container, key)) continue;
+                const value = container[key];
+                if (value === true || value === 1 || /^(?:true|success|successful|caught|captured)$/i.test(String(value))) return true;
+                if (value === false || value === 0 || /^(?:false|fail|failed|missed|escaped)$/i.test(String(value))) return false;
+            }
+            if (container.ok === false) return false;
+            const status = String(container.status ?? container.outcome ?? container.resultType ?? '');
+            if (/caught|captured|success/i.test(status)) return true;
+            if (/fail|miss|escape|broke\s*free/i.test(status)) return false;
+        }
+        return null;
+    }
+
+    let caughtPokedexRefreshTimer = null;
+    let lastCaughtPokedexRefreshAt = 0;
+    function queueCaughtPokedexRefresh(delay = 500) {
+        if (caughtPokedexRefreshTimer) return;
+        const minimumInterval = 5000;
+        const wait = Math.max(delay, lastCaughtPokedexRefreshAt + minimumInterval - Date.now());
+        caughtPokedexRefreshTimer = setTimeout(() => {
+            caughtPokedexRefreshTimer = null;
+            lastCaughtPokedexRefreshAt = Date.now();
+            loadCaughtPokedexData();
+        }, wait);
+    }
+
+    function handleRealtimeCatchResult(message) {
+        const success = getCatchResultSuccess(message);
+        if (success === false) return;
+
+        if (success === true) {
+            const containers = [message, message?.result, message?.data, message?.payload, message?.pokemon, message?.poke]
+                .filter(value => value && typeof value === 'object');
+            const eventName = containers
+                .map(value => value.pokemonName ?? value.pokeName ?? value.speciesName ?? value.name)
+                .find(Boolean);
+            markPokemonAsCaught(eventName || getCurrentHuntLocation() || currentHuntSnapshot?.locName || getLastHunt());
+        }
+
+        // Confere a fonte oficial mesmo quando o payload não expõe um indicador
+        // conhecido de sucesso. O debounce evita consultar a API a cada Poké Bola.
+        queueCaughtPokedexRefresh(success === true ? 350 : 750);
+    }
+
     // A API /api/game/pokedex é a fonte confiável do status "capturado" (por pokeId);
     // o resultado fica em cache (nomes) para que o filtro/badge do mapa funcionem sem depender da Pokédex estar aberta.
     let caughtPokedexPromise = null;
-    function loadCaughtPokedexData(force = false) {
-        if (!force && caughtPokedexPromise) return caughtPokedexPromise;
+    function loadCaughtPokedexData() {
+        if (caughtPokedexPromise) return caughtPokedexPromise;
         caughtPokedexPromise = gameApiRequest('/api/game/pokedex')
             .then(payload => {
                 const species = Array.isArray(payload?.species) ? payload.species : [];
                 const caughtIds = new Set(species.filter(s => s?.caught).map(s => Number(s.id)));
                 let changed = false;
                 for (const [name, poke] of globalCreatureApiData.entries()) {
-                    const pokeId = Number(poke?.pokeId ?? poke?.id);
+                    const pokeId = Number(poke?.speciesId ?? poke?.pokeId ?? poke?.id);
                     if (Number.isFinite(pokeId) && caughtIds.has(pokeId) && !globalCaughtPokemonNames.has(name)) {
                         globalCaughtPokemonNames.add(name);
                         changed = true;
@@ -6074,7 +6138,7 @@
         if (dexWindow.querySelector('.dex-script-controls')) {
             return;
         }
-        loadCaughtPokedexData(true);
+        loadCaughtPokedexData();
 
         const dexControls = dexWindow.querySelector('.dex-controls');
         if (!dexControls) return;
@@ -6605,6 +6669,8 @@
             capturesCount = currentCatch;
             lastCatchTimestamp = Date.now();
             ballsAtLastCatch = currentBalls;
+            markPokemonAsCaught(locName || getLastHunt());
+            queueCaughtPokedexRefresh(350);
         }
 
         const ratesNode = haWindow.querySelector('.ha-rates');
