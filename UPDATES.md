@@ -8,6 +8,14 @@ As versões seguem o formato `MAJOR.MINOR.PATCH`:
 - **MINOR:** nova função ou revisão importante;
 - **PATCH:** correção pequena sem mudança relevante de uso.
 
+## 10.5.0 — 07/10/2026
+
+### Filtros persistentes no mapa de hunts
+
+- A ordenação escolhida, como **Preço: Menor → Maior**, permanece selecionada ao fechar e abrir novamente a tela de hunts.
+- Os filtros de tipo, acesso e estado de captura também são lembrados pelo navegador.
+- Valores salvos inválidos ou incompatíveis são descartados com segurança e substituídos pelos padrões.
+
 ## 10.4.5 — 28/09/2026
 
 ### Nome do userscript

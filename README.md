@@ -2,7 +2,7 @@
 
 Userscript gratuito para [Pokémon Idle World](https://poke.idleworld.online/play) com atalhos de navegação, mapa aprimorado, lojas portáteis, melhorias no Hunt Analyzer e recuperação automática de hunts.
 
-[![Versão](https://img.shields.io/badge/vers%C3%A3o-10.4.5-blue?style=for-the-badge)](UPDATES.md)
+[![Versão](https://img.shields.io/badge/vers%C3%A3o-10.5.0-blue?style=for-the-badge)](UPDATES.md)
 [![Instalar](https://img.shields.io/badge/instalar-userscript-brightgreen?style=for-the-badge)](https://raw.githubusercontent.com/devjoebrito/QoL-PIW-Joe/main/Poke%20Idle%20World%20-%20Quality%20of%20Life%20%28PIW-QOL%29%20-%20Joe%27s%20Version.user.js)
 [![Atualizações](https://img.shields.io/badge/notas-UPDATES.md-orange?style=for-the-badge)](UPDATES.md)
 
@@ -21,7 +21,7 @@ O PIW-QOL melhora a interface do jogo e concentra funções que normalmente exig
 - auto-reconnect com confirmação do servidor, backoff e proteção para bosses;
 - configurações persistidas localmente no navegador.
 
-A versão **10.4.5** usa o nome oficial **Poke Idle World - Quality of Life (PIW-QOL) - Joe's Version** no Tampermonkey, além de manter a instalação direta por `.user.js` e as melhorias recentes. Consulte o [histórico de atualizações](UPDATES.md).
+A versão **10.5.0** usa o nome oficial **Poke Idle World - Quality of Life (PIW-QOL) - Joe's Version** no Tampermonkey, além de manter a instalação direta por `.user.js` e as melhorias recentes. Consulte o [histórico de atualizações](UPDATES.md).
 
 > O script não joga sozinho. Compras, vendas, teletransportes e movimentações de inventário continuam dependendo das ações do jogador. O auto-reconnect apenas tenta restaurar a hunt que já estava ativa.
 
@@ -80,7 +80,7 @@ O mapa pode ser apresentado como uma lista organizada. Cada hunt pode exibir:
 - estado de captura no Pokédex;
 - estrela de favorito.
 
-A lista oferece busca por nome de Pokémon ou drop, filtros de tipo, acesso, vantagem, favoritos e capturados, além de ordenação por preço, efetividade e experiência.
+A lista oferece busca por nome de Pokémon ou drop, filtros de tipo, acesso, vantagem, favoritos e capturados, além de ordenação por preço, efetividade e experiência. A ordenação e os filtros selecionados ficam salvos no navegador e são restaurados quando a tela de hunts é aberta novamente.
 
 ### Capturados e não capturados
 
@@ -315,7 +315,7 @@ As notas de cada versão e o procedimento de publicação estão em [UPDATES.md]
 
 ### Lojas ou Depot não aparecem durante a hunt
 
-Na versão 10.4.5, isso é intencional. Durante hunts, Lojas/Mercado e Depot ficam ocultos; use o botão 🏠 para voltar a Cerulean. Esses serviços continuam visíveis no mapa de Mercado e nos demais locais que não sejam hunts.
+Na versão 10.5.0, isso é intencional. Durante hunts, Lojas/Mercado e Depot ficam ocultos; use o botão 🏠 para voltar a Cerulean. Esses serviços continuam visíveis no mapa de Mercado e nos demais locais que não sejam hunts.
 
 ### O auto-reconnect não foi executado
 

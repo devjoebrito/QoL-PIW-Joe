@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Poke Idle World - Quality of Life (PIW-QOL) - Joe's Version
 // @namespace    http://tampermonkey.net/
-// @version      10.4.5
+// @version      10.5.0
 // @description  Mercado e Depot fora das hunts, retorno rápido à cidade, buscas de itens e auto-reconnect resiliente.
 // @author       Desjunior (JulianoCLI)
 // @updater      JoeBrito
@@ -792,11 +792,27 @@
             access: 'all',
             captured: ''
         };
-        return fallback;
+        try {
+            const stored = JSON.parse(localStorage.getItem(STORAGE_MAP_FILTERS) || 'null');
+            if (!stored || typeof stored !== 'object' || Array.isArray(stored)) return fallback;
+
+            const allowedSorts = new Set(['', 'price_desc', 'price_asc', 'eff_desc', 'xp_desc']);
+            const allowedAccess = new Set(['all', 'accessible', 'favorites', 'advantage', 'neutral', 'disadvantage', 'locked', 'not_favorites']);
+            const allowedCaptured = new Set(['', 'yes', 'no']);
+            return {
+                sort: allowedSorts.has(stored.sort) ? stored.sort : fallback.sort,
+                type: typeof stored.type === 'string' ? stored.type : fallback.type,
+                access: allowedAccess.has(stored.access) ? stored.access : fallback.access,
+                captured: allowedCaptured.has(stored.captured) ? stored.captured : fallback.captured
+            };
+        } catch (error) {
+            console.warn('Falha ao ler os filtros salvos da hunt. Os valores padrão serão usados.', error);
+            return fallback;
+        }
     }
 
     function setMapFilters(filters) {
-        localStorage.removeItem(STORAGE_MAP_FILTERS);
+        localStorage.setItem(STORAGE_MAP_FILTERS, JSON.stringify(filters));
     }
 
     function simplifyNativeMapControls(mapWindow) {
@@ -3315,14 +3331,6 @@
             }
             customFilterBar.style.display = viewMode === 'cities' ? 'none' : 'grid';
             captureFilterBar.style.display = viewMode === 'cities' ? 'none' : '';
-            if (openedNow) {
-                customFilterBar.querySelector('#sort-hunts-select').value = '';
-                customFilterBar.querySelector('#filter-hunts-type').value = '';
-                customFilterBar.querySelector('#filter-hunts-access').value = 'all';
-                captureFilterBar.dataset.active = '';
-                captureFilterBar.querySelectorAll('.dex-fbtn').forEach(button => button.classList.remove('on'));
-            }
-
             let simpleContainer = document.getElementById('simple-hunts-container');
             if (!simpleContainer) {
                 simpleContainer = document.createElement('div');
